@@ -71,9 +71,9 @@ fixed 8x8 row/column sizing so empty ranks never collapse.
 
 ## Build and install
 
-The repository's `android-toolchain/` directory contains the portable JDK,
-Android SDK, and platform tools used for this build. Node.js/npm must be on
-`PATH`. Enable USB debugging on the phone and connect it, then run:
+Install JDK 17 or newer, the Android SDK with platform tools, and Node.js/npm.
+Set `JAVA_HOME` and `ANDROID_HOME`, enable USB debugging on the phone, connect
+it, then run:
 
 ```text
 build-and-install.cmd
@@ -86,8 +86,9 @@ connected phone, and launches it. The APK is written to:
 app\build\outputs\apk\debug\app-debug.apk
 ```
 
-The project can also be opened in Android Studio. It targets Android 16
-(API 36), supports Android 8.0 and newer, and uses Gradle's checked-in wrapper.
+The project can also be opened in Android Studio, which can supply the JDK and
+Android SDK. It targets Android 16 (API 36), supports Android 8.0 and newer, and
+uses Gradle's checked-in wrapper.
 
 ## Architecture
 

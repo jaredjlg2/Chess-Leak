@@ -2184,10 +2184,11 @@ document.querySelectorAll('input[name="game-filter"]').forEach((input) => {
   input.addEventListener("change", updateGameFilterSummary);
 });
 const androidDownload = $("#download-android");
-if (androidDownload) androidDownload.hidden = window.location.protocol === "file:";
+const isPackagedApp = window.location.protocol === "file:";
+if (androidDownload) androidDownload.hidden = isPackagedApp;
 
-const remembered = localStorage.getItem("lastUsername") || "sonyjared";
-$("#username").value = remembered;
+const remembered = localStorage.getItem("lastUsername") || "";
+$("#username").value = isPackagedApp ? remembered : "";
 let rememberedFilters = DEFAULT_FILTER_IDS;
 try {
   rememberedFilters = normalizeFilterIds(JSON.parse(localStorage.getItem("lastFilterIds") || "null"));

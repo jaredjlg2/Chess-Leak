@@ -260,7 +260,14 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
 .review-summary span { display: block; margin-top: 4px; color: var(--muted); font-size: .63rem; font-weight: 750; white-space: nowrap; }
 
 .training-section { padding: 30px 0 48px; }
-.training-shell { max-width: 650px; margin: 0 auto; }
+.training-shell {
+  width: 100%;
+  max-width: min(650px, calc(100vh - 96px));
+  margin: 0 auto;
+}
+@supports (height: 100svh) {
+  .training-shell { max-width: min(650px, calc(100svh - 96px)); }
+}
 .deck-switch { margin-bottom: 10px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--paper-deep); }
 .deck-tab { min-height: 40px; padding: 8px 12px; border-radius: 10px; color: var(--muted); background: transparent; box-shadow: none; font-size: .76rem; }
 .deck-tab:hover:not(:disabled) { transform: none; color: var(--ink); background: rgb(255 255 255 / 65%); box-shadow: none; }

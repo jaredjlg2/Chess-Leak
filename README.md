@@ -21,6 +21,7 @@ On Android, the browser may ask you to allow installation from this source. Down
 - Recognizes checkmate and other completed positions without requesting an invalid engine reply.
 - Saves chosen positions to a dedicated **Review** bank.
 - Supports **Got it, next** for ideas you feel comfortable retiring.
+- Tracks distinct daily and weekly completions, a practice-day streak, and meaningful goal milestones without farmable points.
 
 ## Privacy
 

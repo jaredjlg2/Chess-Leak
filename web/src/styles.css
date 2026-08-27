@@ -254,10 +254,21 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
 .workspace-head { padding: clamp(46px, 8vw, 76px) 0 28px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 1fr auto; gap: 28px; align-items: end; }
 .workspace-head h1 { margin-bottom: 12px; font-size: clamp(3rem, 8vw, 5.2rem); }
 .workspace-head .lede { margin-bottom: 0; font-size: .98rem; }
-.review-summary { display: grid; grid-template-columns: repeat(2, minmax(88px, 1fr)); gap: 7px; }
+.review-summary { width: 250px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .review-summary > div { padding: 12px 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--card); }
 .review-summary strong { display: block; font-size: 1.22rem; line-height: 1; letter-spacing: -.035em; }
-.review-summary span { display: block; margin-top: 4px; color: var(--muted); font-size: .63rem; font-weight: 750; white-space: nowrap; }
+.review-summary span { display: block; margin-top: 4px; color: var(--muted); font-size: .63rem; font-weight: 800; white-space: nowrap; }
+.momentum-stat small { display: block; margin-top: 7px; color: var(--muted); font-size: .56rem; line-height: 1.25; }
+.momentum-mini-track, .momentum-track { overflow: hidden; border-radius: 999px; background: var(--paper-deep); }
+.momentum-mini-track { height: 3px; margin-top: 9px; }
+.momentum-mini-track i, .momentum-track i { display: block; height: 100%; border-radius: inherit; background: var(--lime); transition: width .4s ease; }
+.momentum-week { grid-column: 1 / -1; }
+.momentum-week > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.momentum-week > div:first-child span { margin: 0; color: var(--ink); font-size: .68rem; }
+.momentum-week > div:first-child strong { font-size: .82rem; letter-spacing: -.02em; }
+.momentum-track { height: 6px; margin-top: 9px; background: #dde2d8; }
+.momentum-track i { background: var(--green); }
+.momentum-week p { margin: 8px 0 0; color: var(--muted); font-size: .58rem; font-weight: 720; line-height: 1.35; }
 
 .training-section { padding: 30px 0 48px; }
 .training-shell {
@@ -279,6 +290,7 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
 .puzzles { display: grid; }
 
 .puzzle { padding: clamp(10px, 2.4vw, 18px); border: 1px solid var(--line); border-radius: 22px; background: var(--card); box-shadow: var(--shadow); }
+.puzzle.success-pulse { animation: success-pulse .65s ease; }
 .puzzle-head { min-height: 34px; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .puzzle-head a { padding: 6px 9px; border-radius: 999px; color: var(--green); font-size: .68rem; font-weight: 800; text-decoration: none; }
 .puzzle-title { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
@@ -354,6 +366,37 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
 .more-tools button { min-height: 42px; font-size: .74rem; }
 .report-footer { padding: 22px 0; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 20px; color: var(--muted); font-size: .7rem; font-weight: 700; }
 
+.achievement-toast {
+  position: fixed;
+  z-index: 100;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: min(330px, calc(100% - 28px));
+  padding: 13px 15px;
+  border: 1px solid rgb(201 239 86 / 55%);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: white;
+  background: rgb(16 32 26 / 96%);
+  box-shadow: 0 18px 45px rgb(16 32 26 / 28%);
+  opacity: 0;
+  transform: translate(-50%, 14px) scale(.98);
+  transition: opacity .2s ease, transform .25s ease;
+  pointer-events: none;
+}
+.achievement-toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.achievement-mark { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%; display: grid; place-items: center; color: var(--night); background: var(--lime); font-size: .9rem; font-weight: 950; }
+.achievement-toast strong, .achievement-toast small { display: block; }
+.achievement-toast strong { font-size: .82rem; line-height: 1.2; }
+.achievement-toast small { margin-top: 3px; color: #bdc9c4; font-size: .67rem; }
+
+@keyframes success-pulse {
+  0%, 100% { box-shadow: var(--shadow); }
+  45% { border-color: #8eb42c; box-shadow: 0 0 0 5px rgb(201 239 86 / 24%), 0 18px 45px rgb(20 32 28 / 12%); }
+}
+
 [hidden] { display: none !important; }
 
 @media (max-width: 680px) {
@@ -368,7 +411,7 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
   .brand-compact > span:last-child { display: none; }
   .workspace-head { grid-template-columns: 1fr; gap: 20px; }
   .workspace-head h1 { font-size: clamp(3rem, 14vw, 4.4rem); }
-  .review-summary { max-width: 240px; }
+  .review-summary { width: 100%; max-width: 270px; }
   .report-content { padding-inline: 13px; }
 }
 

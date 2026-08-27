@@ -16,6 +16,9 @@ const PUZZLE_NODES = 4200;
 const ALTERNATIVE_TOLERANCE_CP = 50;
 const TODAY_QUEUE_SIZE = 12;
 const TODAY_DUE_TARGET = 8;
+const DAILY_PRACTICE_GOAL = 5;
+const WEEKLY_PRACTICE_GOAL = 20;
+const REWARD_PAUSE_MS = 650;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CURRICULUM_DB_NAME = "chess-leak-curriculum";
 const CURRICULUM_STORE = "curricula";
@@ -69,6 +72,8 @@ let activePuzzleIndex = 0;
 let todayQueueIds = [];
 let curriculumSaveChain = Promise.resolve();
 let analysisMessage = "";
+let achievementTimer = null;
+let achievementHideTimer = null;
 
 function showView(selector) {
   views.forEach((view) => { $(view).hidden = view !== selector; });
@@ -378,6 +383,7 @@ function createCurriculum(username, filterIds) {
     games: [],
     analyzedGameUrls: [],
     attempts: {},
+    activity: {},
     reportSummary: null,
   };
 }
@@ -397,6 +403,9 @@ function normalizeCurriculum(value, username, filterIds) {
     : curriculum.games.map((game) => game.url).filter(Boolean);
   curriculum.attempts = curriculum.attempts && typeof curriculum.attempts === "object"
     ? curriculum.attempts
+    : {};
+  curriculum.activity = curriculum.activity && typeof curriculum.activity === "object"
+    ? curriculum.activity
     : {};
   return curriculum;
 }
@@ -1126,6 +1135,81 @@ function dateToken(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function localDay(now = new Date(), offset = 0) {
+  const day = new Date(now);
+  day.setHours(12, 0, 0, 0);
+  day.setDate(day.getDate() + offset);
+  return day;
+}
+
+function completedIdsForDay(token) {
+  const ids = currentCurriculum?.activity?.[token]?.completedIds;
+  return Array.isArray(ids) ? ids : [];
+}
+
+function practiceStreak(now = new Date()) {
+  let cursor = localDay(now);
+  if (!completedIdsForDay(dateToken(cursor)).length) cursor = localDay(cursor, -1);
+  let streak = 0;
+  while (completedIdsForDay(dateToken(cursor)).length) {
+    streak += 1;
+    cursor = localDay(cursor, -1);
+  }
+  return streak;
+}
+
+function activityStats(now = new Date()) {
+  const todayToken = dateToken(now);
+  const today = completedIdsForDay(todayToken).length;
+  const available = currentCurriculum?.positions?.length || DAILY_PRACTICE_GOAL;
+  const dailyGoal = Math.max(1, Math.min(DAILY_PRACTICE_GOAL, available));
+  const weekStart = localDay(now);
+  const daysSinceMonday = (weekStart.getDay() + 6) % 7;
+  weekStart.setDate(weekStart.getDate() - daysSinceMonday);
+  const weekStartToken = dateToken(weekStart);
+  const weekly = Object.entries(currentCurriculum?.activity || {}).reduce((total, [token, entry]) => {
+    if (token < weekStartToken || token > todayToken) return total;
+    return total + (Array.isArray(entry?.completedIds) ? entry.completedIds.length : 0);
+  }, 0);
+  return {
+    today,
+    dailyGoal,
+    weekly,
+    weeklyGoal: WEEKLY_PRACTICE_GOAL,
+    streak: practiceStreak(now),
+  };
+}
+
+function recordPracticeCompletion(puzzle, disposition) {
+  if (!currentCurriculum) return { added: false, before: null, after: null };
+  const before = activityStats();
+  const token = dateToken();
+  const id = puzzle.id || puzzleId(puzzle);
+  const previous = currentCurriculum.activity[token];
+  const entry = {
+    completedIds: [],
+    gotIt: 0,
+    review: 0,
+    ...previous,
+  };
+  entry.completedIds = Array.isArray(entry.completedIds) ? entry.completedIds : [];
+  entry.gotIt = Number.isFinite(entry.gotIt) ? entry.gotIt : 0;
+  entry.review = Number.isFinite(entry.review) ? entry.review : 0;
+  const added = !entry.completedIds.includes(id);
+  if (added) {
+    entry.completedIds.push(id);
+    if (disposition === "review") entry.review += 1;
+    else entry.gotIt += 1;
+    entry.updatedAt = Date.now();
+    currentCurriculum.activity[token] = entry;
+    currentCurriculum.updatedAt = entry.updatedAt;
+    queueCurriculumSave();
+  }
+  const after = activityStats();
+  updateReviewSummary();
+  return { added, before, after };
+}
+
 function todayQueueStorageKey() {
   return currentCurriculum ? `todayQueue:${currentCurriculum.key}:${dateToken()}` : "";
 }
@@ -1268,11 +1352,34 @@ function setPuzzleDisposition(puzzle, disposition) {
 
 function updateReviewSummary() {
   if (!currentCurriculum || !$("#review-summary")) return;
-  const stats = reviewStats();
-  $("#review-summary").innerHTML = [
-    [stats.due, "due today"],
-    [stats.mastered, "mastered"],
-  ].map(([value, label]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join("");
+  const stats = activityStats();
+  const todayPercent = Math.min(100, Math.round((stats.today / stats.dailyGoal) * 100));
+  const weeklyPercent = Math.min(100, Math.round((stats.weekly / stats.weeklyGoal) * 100));
+  const message = stats.weekly >= stats.weeklyGoal
+    ? "Weekly goal complete — strong consistency."
+    : stats.today >= stats.dailyGoal
+      ? "Daily goal complete. Anything else is a bonus."
+      : `${stats.dailyGoal - stats.today} more to finish today’s goal.`;
+  $("#review-summary").innerHTML = `
+    <div class="momentum-stat">
+      <strong>${stats.today}/${stats.dailyGoal}</strong>
+      <span>today</span>
+      <div class="momentum-mini-track" role="progressbar" aria-label="Daily practice goal" aria-valuemin="0" aria-valuemax="${stats.dailyGoal}" aria-valuenow="${Math.min(stats.today, stats.dailyGoal)}">
+        <i style="width:${todayPercent}%"></i>
+      </div>
+    </div>
+    <div class="momentum-stat">
+      <strong>${stats.streak}</strong>
+      <span>day streak</span>
+      <small>${stats.streak ? "Keep the chain alive" : "Start with one today"}</small>
+    </div>
+    <div class="momentum-week">
+      <div><span>This week</span><strong>${stats.weekly}/${stats.weeklyGoal}</strong></div>
+      <div class="momentum-track" role="progressbar" aria-label="Weekly practice goal" aria-valuemin="0" aria-valuemax="${stats.weeklyGoal}" aria-valuenow="${Math.min(stats.weekly, stats.weeklyGoal)}">
+        <i style="width:${weeklyPercent}%"></i>
+      </div>
+      <p>${message}</p>
+    </div>`;
   if ($("#analysis-status")) $("#analysis-status").textContent = analysisMessage;
 }
 
@@ -1345,6 +1452,18 @@ function updateDeckTabs() {
   const reviewCount = savedReviewPuzzles().length;
   $("#deck-review").disabled = !reviewCount;
   $("#deck-review").textContent = reviewCount ? `Review ${reviewCount}` : "Review";
+}
+
+function setPracticeNavigationBusy(busy) {
+  if (busy) {
+    ["#deck-today", "#deck-all", "#deck-review", "#puzzle-prev", "#puzzle-next"]
+      .forEach((selector) => { $(selector).disabled = true; });
+    return;
+  }
+  updateDeckTabs();
+  const puzzles = activePuzzles();
+  $("#puzzle-prev").disabled = activePuzzleIndex <= 0;
+  $("#puzzle-next").disabled = activePuzzleIndex >= puzzles.length - 1;
 }
 
 function renderPuzzles() {
@@ -1476,6 +1595,54 @@ function setFeedback(card, kind, message) {
   const node = $(".feedback", card);
   node.className = `feedback ${kind}`;
   node.textContent = message;
+}
+
+function pulsePuzzleSuccess(card) {
+  card.classList.remove("success-pulse");
+  void card.offsetWidth;
+  card.classList.add("success-pulse");
+  window.setTimeout(() => card.classList.remove("success-pulse"), 700);
+}
+
+function achievementMessage(result, disposition) {
+  const { before, after, added } = result;
+  if (!after) return { title: "Position complete", copy: "Keep building the pattern." };
+  if (!added) {
+    return {
+      title: disposition === "review" ? "Still saved for review" : "Nice reinforcement",
+      copy: `${after.today}/${after.dailyGoal} positions complete today.`,
+    };
+  }
+  if (before.weekly < after.weeklyGoal && after.weekly >= after.weeklyGoal) {
+    return { title: "Weekly goal complete", copy: `${after.weekly} thoughtful positions this week.` };
+  }
+  if (before.today < after.dailyGoal && after.today >= after.dailyGoal) {
+    return { title: "Daily goal complete", copy: `${after.today} positions finished. Anything else is a bonus.` };
+  }
+  if (before.today === 0 && after.streak >= 2) {
+    return { title: `${after.streak}-day streak`, copy: "You kept the chain alive." };
+  }
+  return {
+    title: disposition === "review" ? "Saved with intention" : "Pattern locked in",
+    copy: `${after.today}/${after.dailyGoal} positions complete today.`,
+  };
+}
+
+function showAchievement(result, disposition) {
+  const toast = $("#achievement-toast");
+  if (!toast) return;
+  const message = achievementMessage(result, disposition);
+  $("#achievement-title").textContent = message.title;
+  $("#achievement-copy").textContent = message.copy;
+  clearTimeout(achievementTimer);
+  clearTimeout(achievementHideTimer);
+  toast.hidden = false;
+  toast.classList.remove("show");
+  requestAnimationFrame(() => toast.classList.add("show"));
+  achievementTimer = window.setTimeout(() => {
+    toast.classList.remove("show");
+    achievementHideTimer = window.setTimeout(() => { toast.hidden = true; }, 220);
+  }, 1800);
 }
 
 function showSolveControls(card, state) {
@@ -1694,6 +1861,7 @@ function finishGamePosition(card, state, move, options, wasSolve, beforeEvalWhit
       setFeedback(card, "correct", `Checkmate — ${move.san} completes the line.`);
     } else {
       setFeedback(card, "correct", `Checkmate — excellent finish with ${move.san}.`);
+      pulsePuzzleSuccess(card);
     }
     $(".explanation", card).textContent = wasSolve
       ? explainTargetMove(state.puzzle, move)
@@ -1798,9 +1966,11 @@ async function analyzePuzzleMove(card, state, move, options = {}) {
     } else if (isTarget) {
       setFeedback(card, "correct", `Correct — ${move.san}. Review the idea, then move to the next position.`);
       $(".explanation", card).textContent = explainTargetMove(state.puzzle, move, info);
+      pulsePuzzleSuccess(card);
     } else if (isStrongAlternative) {
       setFeedback(card, "correct", `Strong alternative. ${move.san} stays within half a pawn of Stockfish's choice, so it counts as correct.`);
       $(".explanation", card).textContent = `Stockfish's first choice is ${bestSan(new Chess(state.puzzle.fen), baselineInfo?.bestUci)}, but your move preserves essentially the same result.`;
+      pulsePuzzleSuccess(card);
     } else {
       const verdict = info.whiteText.includes("M") && playerAfter < 0
         ? "The opponent now has a forced mate."
@@ -1931,45 +2101,56 @@ function givePuzzleHint(card, state) {
 }
 
 function finishAndAdvance(card, state, disposition) {
+  if (state.busy) return;
   const wasReviewDeck = activeDeck === "review";
   setPuzzleDisposition(state.puzzle, disposition);
+  const progress = recordPracticeCompletion(state.puzzle, disposition);
   updateCardReviewState(card, state.puzzle);
   updateDeckTabs();
+  state.busy = true;
+  setPracticeNavigationBusy(true);
   showExploreControls(card, state);
-  const puzzlesAfter = activePuzzles();
+  pulsePuzzleSuccess(card);
+  showAchievement(progress, disposition);
 
-  if (wasReviewDeck && disposition === "got-it") {
-    if (!puzzlesAfter.length) {
-      activeDeck = todayQueueIds.length ? "today" : "all";
-      const nextDeck = activePuzzles();
-      const completedId = state.puzzle.id || puzzleId(state.puzzle);
-      const completedIndex = nextDeck.findIndex((puzzle) => (puzzle.id || puzzleId(puzzle)) === completedId);
-      activePuzzleIndex = nextDeck.length > 1 && completedIndex >= 0
-        ? (completedIndex + 1) % nextDeck.length
-        : 0;
-    } else {
-      activePuzzleIndex = clampIndex(activePuzzleIndex, puzzlesAfter.length);
+  window.setTimeout(() => {
+    state.busy = false;
+    setPracticeNavigationBusy(false);
+    const puzzlesAfter = activePuzzles();
+
+    if (wasReviewDeck && disposition === "got-it") {
+      if (!puzzlesAfter.length) {
+        activeDeck = todayQueueIds.length ? "today" : "all";
+        const nextDeck = activePuzzles();
+        const completedId = state.puzzle.id || puzzleId(state.puzzle);
+        const completedIndex = nextDeck.findIndex((puzzle) => (puzzle.id || puzzleId(puzzle)) === completedId);
+        activePuzzleIndex = nextDeck.length > 1 && completedIndex >= 0
+          ? (completedIndex + 1) % nextDeck.length
+          : 0;
+      } else {
+        activePuzzleIndex = clampIndex(activePuzzleIndex, puzzlesAfter.length);
+      }
+      renderPuzzles();
+      $("#puzzle-mode")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
     }
-    renderPuzzles();
-    $("#puzzle-mode")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
 
-  if (activePuzzleIndex < puzzlesAfter.length - 1) {
-    activePuzzleIndex += 1;
-    renderPuzzles();
-    $("#puzzle-mode")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
+    if (activePuzzleIndex < puzzlesAfter.length - 1) {
+      activePuzzleIndex += 1;
+      renderPuzzles();
+      $("#puzzle-mode")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
 
-  setFeedback(
-    card,
-    "correct",
-    disposition === "review"
-      ? "Saved to Review. You’re at the end of this set."
-      : "Got it. You’re at the end of this set."
-  );
-  card.querySelectorAll(".finish-actions button").forEach((button) => { button.disabled = true; });
+    setFeedback(
+      card,
+      "correct",
+      disposition === "review"
+        ? "Saved to Review. You’re at the end of this set."
+        : "Got it. You’re at the end of this set."
+    );
+    card.querySelectorAll(".finish-actions button").forEach((button) => { button.disabled = true; });
+  }, REWARD_PAUSE_MS);
 }
 
 async function revealPuzzleAnswer(card, state) {

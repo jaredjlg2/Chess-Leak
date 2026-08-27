@@ -6,6 +6,7 @@
   "scripts": {
     "prebuild": "node scripts/prepare-assets.mjs",
     "build": "vite build",
+    "prebuild:pages": "node scripts/prepare-assets.mjs",
     "build:pages": "vite build --mode pages"
   },
   "dependencies": {

@@ -53,7 +53,7 @@ const GAME_FILTERS = [
   },
 ];
 const PIECES = {
-  w: { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" },
+  w: { p: "♙", n: "♘", b: "♗", r: "♖", q: "♕", k: "♔" },
   b: { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" },
 };
 
@@ -72,11 +72,16 @@ let analysisMessage = "";
 
 function showView(selector) {
   views.forEach((view) => { $(view).hidden = view !== selector; });
+  document.querySelector('meta[name="theme-color"]')?.setAttribute(
+    "content",
+    selector === "#report" ? "#f2f3ed" : "#12201c"
+  );
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function setProgress(percent, title, detail) {
   $("#progress-fill").style.width = `${Math.max(2, Math.min(100, percent))}%`;
+  $(".progress")?.setAttribute("aria-valuenow", String(Math.round(percent)));
   $("#working-title").textContent = title;
   $("#progress-text").textContent = detail;
 }
@@ -212,6 +217,7 @@ function setSelectedFilterIds(ids) {
   document.querySelectorAll('input[name="game-filter"]').forEach((input) => {
     input.checked = selected.has(input.value);
   });
+  updateGameFilterSummary();
 }
 
 function filterLabel(filterId, mode = "shortLabel") {
@@ -223,6 +229,15 @@ function filterSummary(filterIds) {
   if (!labels.length) return "selected games";
   if (labels.length === 1) return labels[0];
   return `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
+function updateGameFilterSummary() {
+  const summary = $("#filter-summary");
+  if (!summary) return;
+  const selected = selectedFilterIds();
+  summary.textContent = selected.length
+    ? `${filterSummary(selected)} selected`
+    : "Choose at least one";
 }
 
 function parseClock(timeControl) {
@@ -1086,6 +1101,7 @@ function reviewStateFor(puzzle) {
 function reviewStatusFor(puzzle, now = Date.now()) {
   const state = reviewStateFor(puzzle);
   if (!state?.attempts) return { key: "new", label: "New" };
+  if (state.savedForReview) return { key: "saved", label: "Review" };
   if (state.dueAt <= now) return { key: "due", label: state.lastCorrect ? "Due" : "Retry due" };
   if (state.mastered) return { key: "mastered", label: "Mastered" };
   return { key: "learning", label: "Learning" };
@@ -1097,7 +1113,13 @@ function reviewStats(now = Date.now()) {
     const status = reviewStatusFor(puzzle, now).key;
     stats[status] += 1;
     return stats;
-  }, { new: 0, due: 0, learning: 0, mastered: 0 });
+  }, { new: 0, due: 0, learning: 0, mastered: 0, saved: 0 });
+}
+
+function savedReviewPuzzles() {
+  return (currentCurriculum?.positions || [])
+    .filter((puzzle) => reviewStateFor(puzzle)?.savedForReview)
+    .sort((a, b) => (reviewStateFor(b)?.savedAt || 0) - (reviewStateFor(a)?.savedAt || 0));
 }
 
 function dateToken(now = new Date()) {
@@ -1209,13 +1231,46 @@ function recordPuzzleAttempt(puzzle, outcome) {
   updateReviewSummary();
 }
 
+function setPuzzleDisposition(puzzle, disposition) {
+  if (!currentCurriculum) return;
+  const id = puzzle.id || puzzleId(puzzle);
+  const now = Date.now();
+  const previous = currentCurriculum.attempts[id] || {};
+  const state = {
+    attempts: 1,
+    correct: 0,
+    incorrect: 0,
+    hints: 0,
+    reveals: 0,
+    streak: 0,
+    intervalDays: 0,
+    dueAt: now,
+    mastered: false,
+    ...previous,
+  };
+  if (disposition === "review") {
+    state.savedForReview = true;
+    state.savedAt = now;
+    state.mastered = false;
+  } else {
+    state.savedForReview = false;
+    state.mastered = true;
+    state.lastCorrect = true;
+    state.streak = Math.max(3, state.streak || 0);
+    state.intervalDays = 120;
+    state.dueAt = now + 120 * DAY_MS;
+  }
+  currentCurriculum.attempts[id] = state;
+  currentCurriculum.updatedAt = now;
+  queueCurriculumSave();
+  updateReviewSummary();
+}
+
 function updateReviewSummary() {
   if (!currentCurriculum || !$("#review-summary")) return;
   const stats = reviewStats();
   $("#review-summary").innerHTML = [
-    [currentCurriculum.positions.length, "unique positions"],
-    [stats.due, "due now"],
-    [stats.new, "not yet seen"],
+    [stats.due, "due today"],
     [stats.mastered, "mastered"],
   ].map(([value, label]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join("");
   if ($("#analysis-status")) $("#analysis-status").textContent = analysisMessage;
@@ -1233,61 +1288,19 @@ function renderReport(report, options = {}) {
   currentReport = report;
   todayQueueIds = buildTodayQueue();
   const progress = loadPuzzleProgress(report);
-  const defaultDeck = todayQueueIds.length
-    ? "today"
-    : report.puzzleDecks?.all?.length
-      ? "all"
-      : report.puzzleDecks?.opportunity?.length
-        ? "opportunity"
-        : "blunder";
-  activeDeck = ["today", "all", "opportunity", "blunder"].includes(progress.deck)
+  const defaultDeck = todayQueueIds.length ? "today" : "all";
+  activeDeck = ["today", "all", "review"].includes(progress.deck)
     ? progress.deck
     : defaultDeck;
   if (!activePuzzles().length) activeDeck = defaultDeck;
   activePuzzleIndex = clampIndex(progress.indexes?.[activeDeck], activePuzzles().length);
-  $("#report-title").textContent = `${report.username}, here’s the leak.`;
-  const ignoredGames = report.gamesFetched - report.eligibleGames;
-  const profile = report.filterSummary || filterSummary(report.filterIds);
-  $("#report-subtitle").textContent = [
-    `${report.gamesAnalyzed} rated ${profile} games accumulated in this on-phone curriculum.`,
-    ignoredGames > 0
-      ? `${ignoredGames} fetched games were outside this profile, variants, unrated, or too short for deliberate-practice evidence.`
-      : "",
-    report.remainingEligibleGames > 0
-      ? `${report.remainingEligibleGames} additional eligible games are ready for the next history scan.`
-      : "",
-    report.archiveMonths ? `Looked back ${report.archiveMonths} monthly archives.` : "",
-    `Priority favors mistakes from the last ${report.currentWindowDays || CURRENT_WINDOW_DAYS} days and patterns that keep recurring.`,
-  ].filter(Boolean).join(" ");
-  const results = report.results;
-  $("#stats").innerHTML = [
-    [`${results.win || 0}–${results.loss || 0}–${results.draw || 0}`, "win–loss–draw"],
-    [report.acpl, "average centipawn loss"],
-    [report.blunders, "blunders found"],
-    [deckTotalText(report), "personal positions"],
-  ].map(([value, label]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join("");
-
-  $("#weaknesses").innerHTML = report.weaknesses.length
-    ? report.weaknesses.map((area, index) => `
-      <article class="weakness">
-        <div class="rank">${index + 1}</div>
-        <div>
-          <h3>${escapeHtml(area.title)}</h3>
-          <p>${escapeHtml(area.prescription)}</p>
-          <div class="evidence">${area.events} events across ${area.games} games · ${area.currentEvents || 0} current · weighted cost ${area.weightedAverage || area.average} cp</div>
-          <div class="trend">${escapeHtml(area.urgency || "")}</div>
-        </div>
-      </article>`).join("")
-    : "<p>No recurring serious errors cleared the evidence threshold yet.</p>";
-
-  const top = report.weaknesses[0];
-  $("#practice-plan").innerHTML = [
-    ["5 min", "Prime", top?.prescription || "Review one personal position."],
-    ["15 min", "Transfer", "Play one 10+5 game. Say “checks, captures, threats” before every non-forced move."],
-    ["5 min", "Close", "Find the first moment you felt uncertain, then compare it with your personal deck."],
-  ].map(([minutes, name, action]) => `
-    <div class="practice-step"><strong>${minutes}</strong><div><b>${name}</b><p>${escapeHtml(action)}</p></div></div>
-  `).join("");
+  $("#report-title").textContent = "Today’s practice";
+  $("#report-subtitle").textContent = `${report.username} · ${todayQueueIds.length || deckTotalText(report)} position${(todayQueueIds.length || deckTotalText(report)) === 1 ? "" : "s"} ready`;
+  const topFocus = report.weaknesses[0];
+  $("#focus-title").textContent = topFocus?.title || "Keep building your pattern signal";
+  $("#focus-copy").textContent = topFocus
+    ? `${topFocus.prescription} This showed up in ${topFocus.games} game${topFocus.games === 1 ? "" : "s"}.`
+    : "Analyze a few more games so recurring patterns can rise above one-off mistakes.";
 
   updateReviewSummary();
   renderPuzzles();
@@ -1309,6 +1322,7 @@ function activePuzzles() {
     const byId = new Map((currentCurriculum?.positions || []).map((puzzle) => [puzzle.id, puzzle]));
     return todayQueueIds.map((id) => byId.get(id)).filter(Boolean);
   }
+  if (activeDeck === "review") return savedReviewPuzzles();
   return currentReport?.puzzleDecks?.[activeDeck] || currentReport?.puzzles || [];
 }
 
@@ -1316,6 +1330,7 @@ function deckLabel() {
   return ({
     today: "today",
     all: "all personal",
+    review: "saved review",
     opportunity: "opportunity",
     blunder: "blunder repair",
   })[activeDeck] || activeDeck;
@@ -1324,12 +1339,12 @@ function deckLabel() {
 function updateDeckTabs() {
   $("#deck-today")?.classList.toggle("active", activeDeck === "today");
   $("#deck-all")?.classList.toggle("active", activeDeck === "all");
-  $("#deck-opportunity")?.classList.toggle("active", activeDeck === "opportunity");
-  $("#deck-blunder")?.classList.toggle("active", activeDeck === "blunder");
+  $("#deck-review")?.classList.toggle("active", activeDeck === "review");
   $("#deck-today").disabled = !todayQueueIds.length;
   $("#deck-all").disabled = !(currentReport?.puzzleDecks?.all?.length);
-  $("#deck-opportunity").disabled = !(currentReport?.puzzleDecks?.opportunity?.length);
-  $("#deck-blunder").disabled = !(currentReport?.puzzleDecks?.blunder?.length);
+  const reviewCount = savedReviewPuzzles().length;
+  $("#deck-review").disabled = !reviewCount;
+  $("#deck-review").textContent = reviewCount ? `Review ${reviewCount}` : "Review";
 }
 
 function renderPuzzles() {
@@ -1340,13 +1355,13 @@ function renderPuzzles() {
     $("#puzzles").innerHTML = activeDeck === "today"
       ? "<p>Nothing is due today. The full personal bank is still available.</p>"
       : `<p>No ${deckLabel()} positions were found in this curriculum.</p>`;
-    $("#deck-count").textContent = `${deckLabel()} deck: 0 of 0`;
+    $("#deck-count").textContent = "0 positions";
     $("#puzzle-prev").disabled = true;
     $("#puzzle-next").disabled = true;
     return;
   }
   $("#puzzles").replaceChildren(createPuzzleCard(allPuzzles[activePuzzleIndex], activePuzzleIndex));
-  $("#deck-count").textContent = `${deckLabel()} deck: ${activePuzzleIndex + 1} of ${allPuzzles.length}`;
+  $("#deck-count").textContent = `${activePuzzleIndex + 1} of ${allPuzzles.length}`;
   $("#puzzle-prev").disabled = activePuzzleIndex <= 0;
   $("#puzzle-next").disabled = activePuzzleIndex >= allPuzzles.length - 1;
   savePuzzleProgress();
@@ -1364,11 +1379,6 @@ function updateEval(card, cp, text = "") {
   const percent = 50 + 47 * Math.tanh(bounded / 400);
   $(".eval-needle", card).style.left = `${percent}%`;
   $(".eval-label", card).textContent = evalLabel(bounded, text);
-}
-
-function hideEval(card) {
-  card.classList.add("eval-hidden");
-  $(".eval-label", card).textContent = "Evaluation hidden until your first move";
 }
 
 function sameMove(left, right) {
@@ -1392,7 +1402,7 @@ function boardSquares(perspective) {
 function renderBoard(card, state) {
   const board = $(".board", card);
   board.replaceChildren();
-  boardSquares(state.puzzle.color).forEach((square) => {
+  boardSquares(state.puzzle.color).forEach((square, index) => {
     const file = square.charCodeAt(0) - 97;
     const rank = Number(square[1]);
     const piece = state.chess.get(square);
@@ -1400,8 +1410,14 @@ function renderBoard(card, state) {
     button.type = "button";
     button.className = `square ${(file + rank) % 2 ? "dark" : "light"}${piece ? " occupied" : ""}`;
     button.dataset.square = square;
-    button.setAttribute("aria-label", piece ? `${square}, ${piece.color}${piece.type}` : `${square}, empty`);
+    button.setAttribute("aria-label", piece ? `${square}, ${piece.color === "w" ? "white" : "black"} ${pieceName(piece.type)}` : `${square}, empty`);
     if (piece) button.innerHTML = `<span class="piece ${piece.color === "w" ? "white-piece" : "black-piece"}">${PIECES[piece.color][piece.type]}</span>`;
+    if (index % 8 === 0) {
+      button.insertAdjacentHTML("beforeend", `<span class="coordinate rank" aria-hidden="true">${square[1]}</span>`);
+    }
+    if (index >= 56) {
+      button.insertAdjacentHTML("beforeend", `<span class="coordinate file" aria-hidden="true">${square[0]}</span>`);
+    }
     button.addEventListener("click", () => clickSquare(card, state, square));
     board.append(button);
   });
@@ -1463,22 +1479,38 @@ function setFeedback(card, kind, message) {
 }
 
 function showSolveControls(card, state) {
-  $(".hint", card).hidden = false;
+  $("button.hint", card).hidden = false;
+  $("button.hint", card).textContent = state.hintLevel ? "Stronger hint" : "Hint";
+  $("button.hint", card).disabled = state.hintLevel >= 2;
   $(".game-move", card).hidden = false;
   $(".answer", card).hidden = false;
+  $(".retry", card).hidden = true;
   $(".engine", card).hidden = true;
+  $(".advanced-controls", card).hidden = true;
+  $(".advanced-controls", card).open = false;
   $(".line", card).hidden = true;
   $(".explanation", card).hidden = true;
+  $(".finish-actions", card).hidden = true;
   updateMoveControls(card, state);
 }
 
 function showExploreControls(card, state) {
-  $(".hint", card).hidden = true;
+  $("button.hint", card).hidden = true;
   $(".game-move", card).hidden = true;
   $(".answer", card).hidden = true;
-  $(".engine", card).hidden = false;
+  const retry = $(".retry", card);
+  retry.hidden = !state.retry;
+  retry.textContent = state.retry?.ply > 0 ? "Retry this move" : "Try again";
+  const gameOver = state.chess.isGameOver();
+  $(".engine", card).hidden = gameOver;
+  $(".advanced-controls", card).hidden = gameOver;
   $(".explanation", card).hidden = false;
-  $(".line", card).hidden = false;
+  $(".line", card).hidden = gameOver || !$(".line", card).textContent;
+  $(".finish-actions", card).hidden = !state.canFinish;
+  const saveButton = $(".save-review", card);
+  const isSaved = Boolean(reviewStateFor(state.puzzle)?.savedForReview);
+  saveButton.setAttribute("aria-pressed", String(isSaved));
+  saveButton.textContent = isSaved ? "Saved for review" : "Review later";
   updateMoveControls(card, state);
 }
 
@@ -1488,10 +1520,20 @@ function updateMoveControls(card, state) {
   const back = $(".back-move", card);
   const forward = $(".engine", card);
   if (back) back.disabled = state.busy || !hasHistory;
-  if (forward) forward.disabled = state.busy || !hasHistory;
+  if (forward) forward.disabled = state.busy || !hasHistory || state.chess.isGameOver();
+  card.querySelectorAll(".controls button, .finish-actions button").forEach((button) => {
+    if (!button.classList.contains("hint") || state.hintLevel < 2) {
+      button.disabled = state.busy;
+    }
+  });
 }
 
 async function analyzeCurrentPosition(card, state, feedback = "Analyzing current position…") {
+  if (state.chess.isGameOver()) {
+    state.busy = false;
+    updateMoveControls(card, state);
+    return null;
+  }
   state.busy = true;
   updateMoveControls(card, state);
   setFeedback(card, "neutral", feedback);
@@ -1517,6 +1559,10 @@ async function undoPuzzleMove(card, state) {
   renderBoard(card, state);
   if (!state.chess.history().length) {
     state.mode = "solve";
+    state.solved = false;
+    state.canFinish = false;
+    state.retry = null;
+    state.startedAt = Date.now();
     state.lastInfo = null;
     state.lastInfoFen = "";
     state.currentEvalWhite = state.puzzle.evalBeforeWhite;
@@ -1540,15 +1586,55 @@ async function undoPuzzleMove(card, state) {
   }
 }
 
+function retryPuzzleMove(card, state) {
+  if (state.busy || !state.retry) return;
+  const retry = state.retry;
+  while (state.chess.history().length > retry.ply) state.chess.undo();
+  state.selected = null;
+  state.retry = null;
+  state.currentEvalWhite = retry.evalWhite;
+  state.lastInfo = retry.info || null;
+  state.lastInfoFen = retry.info ? state.chess.fen() : "";
+  state.canFinish = retry.wasSolved;
+  clearBoardMarks(card);
+  renderBoard(card, state);
+  updateEval(card, state.currentEvalWhite, retry.evalText || "");
+  $(".line", card).textContent = principalVariation(state.chess, retry.info?.pv);
+  $(".explanation", card).textContent = "Continue from this position. Look for the strongest forcing move.";
+  $(".turn", card).textContent = state.chess.turn() === "w" ? "white to move" : "black to move";
+  if (!retry.ply) {
+    state.mode = "solve";
+    state.solved = false;
+    state.canFinish = false;
+    state.startedAt = Date.now();
+    showSolveControls(card, state);
+    setFeedback(card, "neutral", "Try again. Find a stronger first move.");
+    return;
+  }
+  state.mode = "explore";
+  state.retry = null;
+  state.canFinish = state.solved;
+  showExploreControls(card, state);
+  setFeedback(card, "neutral", "That move is reset. Try a different continuation from here.");
+}
+
 async function playEngineMove(card, state) {
   if (state.busy || !state.chess.history().length) return;
+  if (state.chess.isGameOver()) {
+    showExploreControls(card, state);
+    return;
+  }
   try {
     if (!state.lastInfo?.bestUci || state.lastInfoFen !== state.chess.fen()) {
       await analyzeCurrentPosition(card, state, "Finding the best move from here…");
     }
     const move = uciMove(state.chess, state.lastInfo?.bestUci);
     if (!move) {
-      setFeedback(card, "incorrect", "Stockfish did not return a legal move from this position.");
+      if (state.chess.isGameOver()) {
+        showExploreControls(card, state);
+        return;
+      }
+      setFeedback(card, "incorrect", "The engine could not find a legal continuation.");
       return;
     }
     renderBoard(card, state);
@@ -1560,13 +1646,104 @@ async function playEngineMove(card, state) {
   }
 }
 
+function recordInitialSolve(card, state, outcome) {
+  const solveMs = Math.max(0, Date.now() - state.startedAt);
+  const assisted = state.usedHint || state.usedGameMove;
+  const grade = outcome.revealed
+    ? 0
+    : outcome.correct
+      ? assisted
+        ? 3
+        : solveMs <= 60_000
+          ? 5
+          : 4
+      : outcome.loss < 150
+        ? 2
+        : 0;
+  recordPuzzleAttempt(state.puzzle, {
+    correct: outcome.correct,
+    grade,
+    usedHint: assisted,
+    revealed: Boolean(outcome.revealed),
+    solveMs,
+    moveUci: outcome.moveUci,
+    evalLoss: outcome.loss,
+  });
+  updateCardReviewState(card, state.puzzle);
+}
+
+function finishGamePosition(card, state, move, options, wasSolve, beforeEvalWhite) {
+  const isMate = state.chess.isCheckmate();
+  const attemptedUci = moveUci(move);
+  const exactTarget = sameMove(attemptedUci, state.puzzle.bestUci);
+  const countedCorrect = !options.revealed && (isMate || exactTarget);
+  state.busy = false;
+  state.mode = "explore";
+  state.lastInfo = null;
+  state.lastInfoFen = state.chess.fen();
+  state.retry = null;
+
+  if (isMate) {
+    const whiteCp = move.color === "w" ? 1500 : -1500;
+    state.currentEvalWhite = whiteCp;
+    updateEval(card, whiteCp, move.color === "w" ? "M0" : "-M0");
+    $(".turn", card).textContent = "checkmate";
+    if (options.revealed) {
+      setFeedback(card, "hint", `Answer: ${move.san}. Checkmate.`);
+    } else if (options.automatic) {
+      setFeedback(card, "correct", `Checkmate — ${move.san} completes the line.`);
+    } else {
+      setFeedback(card, "correct", `Checkmate — excellent finish with ${move.san}.`);
+    }
+    $(".explanation", card).textContent = wasSolve
+      ? explainTargetMove(state.puzzle, move)
+      : "The king has no legal escape. The game is over, so there is no engine reply to play.";
+    state.solved = state.solved || countedCorrect || Boolean(options.revealed) || !wasSolve;
+    state.canFinish = state.solved;
+  } else {
+    state.currentEvalWhite = 0;
+    updateEval(card, 0);
+    $(".eval-label", card).textContent = "Draw";
+    $(".turn", card).textContent = "game over";
+    setFeedback(card, exactTarget ? "correct" : "neutral", `Draw — ${move.san} ends the game.`);
+    $(".explanation", card).textContent = "The position is finished, so there is no legal reply to play.";
+    state.solved = state.solved || countedCorrect || Boolean(options.revealed);
+    state.canFinish = state.solved;
+    if (wasSolve && !state.solved) {
+      state.retry = {
+        ply: 0,
+        evalWhite: beforeEvalWhite,
+        info: null,
+        wasSolved: false,
+      };
+    }
+  }
+  $(".line", card).textContent = "";
+  showExploreControls(card, state);
+  if (wasSolve) {
+    recordInitialSolve(card, state, {
+      correct: countedCorrect,
+      revealed: options.revealed,
+      moveUci: attemptedUci,
+      loss: countedCorrect ? 0 : 150,
+    });
+  }
+}
+
 async function analyzePuzzleMove(card, state, move, options = {}) {
   const wasSolve = state.mode === "solve";
+  const previousInfo = state.lastInfo;
+  const previousSolved = state.solved;
+  const retryPly = Math.max(0, state.chess.history().length - 1);
   let beforeEvalWhite = state.currentEvalWhite;
   state.busy = true;
   updateMoveControls(card, state);
   setFeedback(card, "neutral", options.automatic ? `Playing ${move.san} and analyzing…` : `Analyzing ${move.san}…`);
   try {
+    if (state.chess.isGameOver()) {
+      finishGamePosition(card, state, move, options, wasSolve, beforeEvalWhite);
+      return;
+    }
     const engine = await ensureEngine();
     const baselineInfo = wasSolve
       ? (options.baselineInfo || await engine.analyze(state.puzzle.fen, PUZZLE_NODES))
@@ -1590,26 +1767,51 @@ async function analyzePuzzleMove(card, state, move, options = {}) {
     const isTarget = confirmedTarget || (storedTarget && loss < ALTERNATIVE_TOLERANCE_CP);
     const isStrongAlternative = wasSolve && !isTarget && loss < ALTERNATIVE_TOLERANCE_CP;
     const countedCorrect = !options.revealed && (isTarget || isStrongAlternative);
+    if (wasSolve) {
+      state.solved = countedCorrect || Boolean(options.revealed);
+      state.canFinish = state.solved;
+      state.retry = state.solved
+        ? null
+        : {
+            ply: 0,
+            evalWhite: beforeEvalWhite,
+            info: baselineInfo,
+            evalText: baselineInfo?.whiteText,
+            wasSolved: false,
+          };
+    } else if (!options.automatic && loss >= ALTERNATIVE_TOLERANCE_CP) {
+      state.retry = {
+        ply: retryPly,
+        evalWhite: beforeEvalWhite,
+        info: previousInfo,
+        evalText: previousInfo?.whiteText,
+        wasSolved: previousSolved,
+      };
+      state.canFinish = false;
+    } else {
+      state.retry = null;
+      state.canFinish = state.solved;
+    }
     if (options.revealed) {
-      setFeedback(card, "hint", `Answer: ${move.san}. Play through the reply, then this position will return for review.`);
+      setFeedback(card, "hint", `Answer: ${move.san}. Review why it works, then move on or try again.`);
       $(".explanation", card).textContent = explainTargetMove(state.puzzle, move, info);
     } else if (isTarget) {
-      setFeedback(card, "correct", `Correct! ${move.san} is the confirmed target. Use → Best move to see the reply, or tap Next puzzle.`);
+      setFeedback(card, "correct", `Correct — ${move.san}. Review the idea, then move to the next position.`);
       $(".explanation", card).textContent = explainTargetMove(state.puzzle, move, info);
     } else if (isStrongAlternative) {
       setFeedback(card, "correct", `Strong alternative. ${move.san} stays within half a pawn of Stockfish's choice, so it counts as correct.`);
       $(".explanation", card).textContent = `Stockfish's first choice is ${bestSan(new Chess(state.puzzle.fen), baselineInfo?.bestUci)}, but your move preserves essentially the same result.`;
     } else {
       const verdict = info.whiteText.includes("M") && playerAfter < 0
-        ? "Blunder—the opponent now has a forced mate."
+        ? "The opponent now has a forced mate."
         : loss < 50
-          ? "Playable alternative—less than half a pawn from the target."
+          ? "This is a playable alternative."
           : loss < 150
-            ? `Inaccuracy—about ${Math.round(loss)} centipawns lost.`
+            ? "This gives away a small part of your advantage."
             : loss < 300
-              ? `Mistake—about ${Math.round(loss)} centipawns lost.`
-              : `Blunder—about ${Math.round(loss)} centipawns lost.`;
-      setFeedback(card, loss < 50 ? "neutral" : "incorrect", `${options.automatic ? "Engine played" : "Played"} ${move.san}. ${verdict} Keep playing from here.`);
+              ? "This gives the opponent a clear chance."
+              : "This changes the position significantly in the opponent’s favor.";
+      setFeedback(card, loss < 50 ? "neutral" : "incorrect", `${options.automatic ? "Engine played" : "Played"} ${move.san}. ${verdict}`);
       $(".explanation", card).textContent = wasSolve
         ? explainWrongMove(state.puzzle, move, state.chess, info)
         : `From this branch, Stockfish now recommends ${bestSan(state.chess, info.bestUci)}.`;
@@ -1617,29 +1819,12 @@ async function analyzePuzzleMove(card, state, move, options = {}) {
     $(".line", card).textContent = principalVariation(state.chess, info.pv);
     showExploreControls(card, state);
     if (wasSolve) {
-      const solveMs = Math.max(0, Date.now() - state.startedAt);
-      const assisted = state.usedHint || state.usedGameMove;
-      const grade = options.revealed
-        ? 0
-        : countedCorrect
-          ? assisted
-            ? 3
-            : solveMs <= 60_000
-              ? 5
-              : 4
-          : loss < 150
-            ? 2
-            : 0;
-      recordPuzzleAttempt(state.puzzle, {
+      recordInitialSolve(card, state, {
         correct: countedCorrect,
-        grade,
-        usedHint: assisted,
         revealed: Boolean(options.revealed),
-        solveMs,
         moveUci: attemptedUci,
-        evalLoss: loss,
+        loss,
       });
-      updateCardReviewState(card, state.puzzle);
     }
   } catch (error) {
     state.busy = false;
@@ -1683,7 +1868,7 @@ function explainTargetMove(puzzle, move, info = null) {
   const gameAfter = puzzle.afterUserCp ?? cpForSide(puzzle.evalAfterWhite, puzzle.color);
   const gain = Number.isFinite(targetAfter) ? Math.max(0, Math.round(targetAfter - gameAfter)) : puzzle.lossCp;
   const comparison = gain >= 50
-    ? `Compared with your game move ${puzzle.playedSan}, this is about ${gain} cp better.`
+    ? `Compared with your game move ${puzzle.playedSan}, this is about ${(gain / 100).toFixed(1)} pawns better.`
     : `It keeps the position at least as healthy as your game move ${puzzle.playedSan}.`;
   return `Why ${move?.san || puzzle.bestSan} works: ${targetMoveReason(puzzle, move)} ${comparison}`;
 }
@@ -1692,7 +1877,7 @@ function explainGameMove(puzzle) {
   const before = puzzle.beforeUserCp ?? cpForSide(puzzle.evalBeforeWhite, puzzle.color);
   const after = puzzle.afterUserCp ?? cpForSide(puzzle.evalAfterWhite, puzzle.color);
   const drop = Math.max(0, Math.round(before - after));
-  return `In the game you played ${puzzle.playedSan}. The target was ${puzzle.bestSan}. Your move dropped your side from ${cpText(before)} to ${cpText(after)} — about ${drop || puzzle.lossCp} cp. Tap Show answer to see the better move, or play your game move to explore the punishment.`;
+  return `In the game you played ${puzzle.playedSan}. The stronger move was ${puzzle.bestSan}. Your move changed the evaluation from ${cpText(before)} to ${cpText(after)}, a swing of about ${((drop || puzzle.lossCp) / 100).toFixed(1)} pawns. Reveal the answer to see the better idea.`;
 }
 
 function explainWrongMove(puzzle, move, chess, info) {
@@ -1713,6 +1898,78 @@ function showGameMove(card, state) {
   const explanation = $(".explanation", card);
   explanation.hidden = false;
   explanation.textContent = explainGameMove(state.puzzle);
+}
+
+function firstHintForPuzzle(puzzle) {
+  const san = puzzle.bestSan || "";
+  if (san.includes("#")) return "There is a checkmating move. Start with every forcing check.";
+  if (san.includes("+") || puzzle.bestMoveIsCheck) return "Start with checks. One of them sharply limits the reply.";
+  if (puzzle.bestMoveCaptured) return "Start with forcing captures, then check whether the capturing piece stays safe.";
+  const theme = String(puzzle.theme || "").toLowerCase();
+  if (theme.includes("opening")) return "Prioritize development, center control, and king safety.";
+  if (theme.includes("endgame")) return "Look for the move that improves activity or gains a tempo.";
+  return "List the forcing moves first: checks, captures, and direct threats.";
+}
+
+function givePuzzleHint(card, state) {
+  if (state.busy || state.hintLevel >= 2) return;
+  state.usedHint = true;
+  state.hintLevel += 1;
+  const button = $("button.hint", card);
+  if (state.hintLevel === 1) {
+    setFeedback(card, "hint", firstHintForPuzzle(state.puzzle));
+    button.textContent = "Stronger hint";
+    return;
+  }
+  const from = String(state.puzzle.bestUci || "").slice(0, 2);
+  const piece = new Chess(state.puzzle.fen).get(from);
+  clearBoardMarks(card);
+  $(`[data-square="${from}"]`, card)?.classList.add("selected");
+  setFeedback(card, "hint", `Focus on the ${pieceName(piece?.type)} on ${from}. The destination is still yours to find.`);
+  button.textContent = "Hints used";
+  button.disabled = true;
+}
+
+function finishAndAdvance(card, state, disposition) {
+  const wasReviewDeck = activeDeck === "review";
+  setPuzzleDisposition(state.puzzle, disposition);
+  updateCardReviewState(card, state.puzzle);
+  updateDeckTabs();
+  showExploreControls(card, state);
+  const puzzlesAfter = activePuzzles();
+
+  if (wasReviewDeck && disposition === "got-it") {
+    if (!puzzlesAfter.length) {
+      activeDeck = todayQueueIds.length ? "today" : "all";
+      const nextDeck = activePuzzles();
+      const completedId = state.puzzle.id || puzzleId(state.puzzle);
+      const completedIndex = nextDeck.findIndex((puzzle) => (puzzle.id || puzzleId(puzzle)) === completedId);
+      activePuzzleIndex = nextDeck.length > 1 && completedIndex >= 0
+        ? (completedIndex + 1) % nextDeck.length
+        : 0;
+    } else {
+      activePuzzleIndex = clampIndex(activePuzzleIndex, puzzlesAfter.length);
+    }
+    renderPuzzles();
+    $("#puzzle-mode")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (activePuzzleIndex < puzzlesAfter.length - 1) {
+    activePuzzleIndex += 1;
+    renderPuzzles();
+    $("#puzzle-mode")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  setFeedback(
+    card,
+    "correct",
+    disposition === "review"
+      ? "Saved to Review. You’re at the end of this set."
+      : "Got it. You’re at the end of this set."
+  );
+  card.querySelectorAll(".finish-actions button").forEach((button) => { button.disabled = true; });
 }
 
 async function revealPuzzleAnswer(card, state) {
@@ -1737,29 +1994,40 @@ async function revealPuzzleAnswer(card, state) {
 
 function createPuzzleCard(puzzle, index) {
   const card = document.createElement("article");
-  card.className = "puzzle eval-hidden";
-  const prompt = activeDeck === "blunder"
-    ? "Blunder repair: avoid the move from your game."
-    : puzzle.deckTags?.includes("opportunity")
-      ? "Opportunity: find the move that wins or preserves your chance."
-      : "Personal review: find the strongest practical move.";
+  card.className = "puzzle";
+  const prompt = "Find the strongest move.";
   const status = reviewStatusFor(puzzle);
+  const side = puzzle.color === "w" ? "White" : "Black";
   card.innerHTML = `
-    <div class="puzzle-head"><div class="puzzle-title"><span class="eyebrow">${escapeHtml(puzzle.theme)}</span><span class="review-state ${status.key}">${status.label}</span></div><a href="${escapeHtml(puzzle.gameUrl)}">game ↗</a></div>
-    <div class="eval-bar"><span class="eval-needle"></span></div>
-    <div class="eval-meta"><span class="eval-label"></span><span class="turn"></span></div>
+    <div class="puzzle-head"><div class="puzzle-title"><span class="eyebrow">${escapeHtml(puzzle.theme)}</span><span class="review-state ${status.key}">${status.label}</span></div><a href="${escapeHtml(puzzle.gameUrl)}" aria-label="Open the original game">Original game ↗</a></div>
+    <div class="evaluation">
+      <div class="eval-bar"><span class="eval-needle"></span></div>
+      <div class="eval-meta"><span class="eval-label"></span><span class="turn"></span></div>
+    </div>
     <div class="board" aria-label="Playable chess position"></div>
-    <p class="prompt">Position ${index + 1} · You are ${puzzle.color === "w" ? "white" : "black"}. ${prompt}</p>
-    <p class="feedback neutral" aria-live="polite">Your move. Every legal branch is playable.</p>
+    <div class="position-brief">
+      <p class="position-meta">Position ${index + 1} · ${side} to move</p>
+      <p class="prompt">${prompt}</p>
+    </div>
+    <p class="feedback neutral" aria-live="polite">Make your move.</p>
     <div class="controls">
       <button class="hint" type="button">Hint</button>
-      <button class="game-move secondary" type="button">My game move</button>
-      <button class="answer secondary" type="button">Show answer</button>
-      <button class="back-move ghost" type="button" disabled>← Back move</button>
-      <button class="engine secondary" type="button" hidden>→ Best move</button>
-      <button class="retry ghost" type="button">Retry</button>
+      <button class="game-move" type="button">My move</button>
+      <button class="answer" type="button">Reveal answer</button>
+      <button class="retry" type="button" hidden>Try again</button>
     </div>
-    <p class="line" hidden></p>
+    <div class="finish-actions" aria-label="Finish this position" hidden>
+      <button class="got-it" type="button">Got it, next →</button>
+      <button class="save-review" type="button" aria-pressed="false">Review later</button>
+    </div>
+    <details class="advanced-controls" hidden>
+      <summary>Play the continuation</summary>
+      <div class="advanced-actions">
+        <button class="back-move" type="button" disabled>← Back</button>
+        <button class="engine" type="button" hidden>Best reply →</button>
+      </div>
+      <p class="line" hidden></p>
+    </details>
     <p class="explanation" hidden></p>`;
   const state = {
     puzzle,
@@ -1773,22 +2041,23 @@ function createPuzzleCard(puzzle, index) {
     startedAt: Date.now(),
     usedHint: false,
     usedGameMove: false,
+    hintLevel: 0,
+    solved: false,
+    canFinish: false,
+    retry: null,
   };
   renderBoard(card, state);
-  hideEval(card);
+  updateEval(card, state.currentEvalWhite);
   $(".turn", card).textContent = state.chess.turn() === "w" ? "white to move" : "black to move";
 
-  $(".hint", card).addEventListener("click", () => {
-    state.usedHint = true;
-    const from = puzzle.bestUci.slice(0, 2);
-    const to = puzzle.bestUci.slice(2, 4);
-    setFeedback(card, "hint", `Try the piece on ${from}. Stronger hint: its target is ${to}.`);
-  });
+  $("button.hint", card).addEventListener("click", () => givePuzzleHint(card, state));
   $(".answer", card).addEventListener("click", () => revealPuzzleAnswer(card, state));
   $(".game-move", card).addEventListener("click", () => showGameMove(card, state));
   $(".back-move", card).addEventListener("click", () => undoPuzzleMove(card, state));
   $(".engine", card).addEventListener("click", () => playEngineMove(card, state));
-  $(".retry", card).addEventListener("click", () => resetPuzzle(card, state));
+  $(".retry", card).addEventListener("click", () => retryPuzzleMove(card, state));
+  $(".got-it", card).addEventListener("click", () => finishAndAdvance(card, state, "got-it"));
+  $(".save-review", card).addEventListener("click", () => finishAndAdvance(card, state, "review"));
   updateMoveControls(card, state);
   return card;
 }
@@ -1804,11 +2073,15 @@ function resetPuzzle(card, state) {
   state.startedAt = Date.now();
   state.usedHint = false;
   state.usedGameMove = false;
+  state.hintLevel = 0;
+  state.solved = false;
+  state.canFinish = false;
+  state.retry = null;
   renderBoard(card, state);
-  hideEval(card);
+  updateEval(card, state.currentEvalWhite);
   $(".turn", card).textContent = state.chess.turn() === "w" ? "white to move" : "black to move";
   showSolveControls(card, state);
-  setFeedback(card, "neutral", "Your move. Every legal branch is playable.");
+  setFeedback(card, "neutral", "Make your move.");
 }
 
 async function startAnalysis(username, filterIds = selectedFilterIds()) {
@@ -1874,6 +2147,7 @@ $("#cancel-analysis").addEventListener("click", () => {
 });
 $("#retry-analysis").addEventListener("click", () => startAnalysis(currentUsername || $("#username").value, selectedFilterIds()));
 $("#change-player").addEventListener("click", () => showView("#onboarding"));
+$("#error-change-player").addEventListener("click", () => showView("#onboarding"));
 $("#analyze-more").addEventListener("click", () => startAnalysis(
   currentReport?.username || currentUsername || $("#username").value,
   currentReport?.filterIds || selectedFilterIds()
@@ -1900,18 +2174,17 @@ $("#deck-all").addEventListener("click", () => {
   activePuzzleIndex = clampIndex(progress.indexes?.all, activePuzzles().length);
   renderPuzzles();
 });
-$("#deck-opportunity").addEventListener("click", () => {
+$("#deck-review").addEventListener("click", () => {
   const progress = loadPuzzleProgress(currentReport);
-  activeDeck = "opportunity";
-  activePuzzleIndex = clampIndex(progress.indexes?.opportunity, activePuzzles().length);
+  activeDeck = "review";
+  activePuzzleIndex = clampIndex(progress.indexes?.review, activePuzzles().length);
   renderPuzzles();
 });
-$("#deck-blunder").addEventListener("click", () => {
-  const progress = loadPuzzleProgress(currentReport);
-  activeDeck = "blunder";
-  activePuzzleIndex = clampIndex(progress.indexes?.blunder, activePuzzles().length);
-  renderPuzzles();
+document.querySelectorAll('input[name="game-filter"]').forEach((input) => {
+  input.addEventListener("change", updateGameFilterSummary);
 });
+const androidDownload = $("#download-android");
+if (androidDownload) androidDownload.hidden = window.location.protocol === "file:";
 
 const remembered = localStorage.getItem("lastUsername") || "sonyjared";
 $("#username").value = remembered;

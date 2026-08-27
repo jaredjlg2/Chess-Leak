@@ -1,102 +1,58 @@
-# Chess Leak for Android
+# Chess Leak
 
-Chess Leak is a small native Android shell around an offline-first coaching UI.
-It uses the public Chess.com API for game history, `chess.js` for legal moves,
-and Stockfish 18 WebAssembly for analysis. No account login is required and the
-report stays on the device.
+Chess Leak turns mistakes from your own Chess.com games into a focused personal puzzle library. It runs Stockfish on the device, requires no Chess.com login, and keeps analysis and practice progress in local browser/app storage.
 
-## What it analyzes
+## Try or install it
 
-- A selectable Chess.com game profile from the main screen:
-  - Daily
-  - 10-minute rapid
-  - Other rapid
-  - Blitz
-  - Bullet
-- Daily + 10-minute rapid is the default profile, so fast 1/3-minute noise is
-  excluded unless you explicitly turn those buckets on.
-- Up to the newest 80 rated standard games matching the selected profile and
-  lasting at least eight full moves.
-- The app looks back up to 12 monthly archives normally, or up to 24 when Daily
-  is selected, because daily games are naturally sparse.
-- Up to the first 36 user moves in each game, which concentrates the mobile
-  analysis budget where recurring practical errors are most actionable.
-- Weakness ranking is recency- and persistence-weighted. Older games can supply
-  evidence, but old-only patterns are suppressed. Themes that appeared
-  historically and still appear in the last 90 days receive the strongest
-  urgency boost.
+- **Use the web app:** [jaredjlg2.github.io/Chess-Leak](https://jaredjlg2.github.io/Chess-Leak/)
+- **Download Android:** [Chess-Leak.apk](https://github.com/jaredjlg2/Chess-Leak/releases/latest/download/Chess-Leak.apk)
+- **See all releases:** [GitHub Releases](https://github.com/jaredjlg2/Chess-Leak/releases)
 
-The report ranks recurring costly patterns, creates a two-week practice loop,
-and builds two personal position decks:
+On Android, the browser may ask you to allow installation from this source. Download the APK, open it, and approve that one-time permission if prompted. Android 8.0 or newer is required.
 
-- **Opportunity**: stricter puzzle-like positions where there was something
-  concrete or valuable to win/preserve.
-- **Blunder repair**: positions focused on the move actually played in the game
-  and why it failed.
+## What it does
 
-Puzzle mode shows one position at a time. Positions are deduplicated and kept in
-a permanent per-player, per-game-profile bank; the old 48-position deck limit is
-gone. **Today** mixes due reviews with unseen personal positions, while **All
-personal**, **Opportunity**, and **Blunder repair** provide browsable views of
-the full bank. The app records first-try accuracy, solve time, hints, answer
-reveals, and retries, then schedules each position through learning, due, and
-mastered states. **Find more from my games** analyzes the next unseen batch of
-eligible games and merges the new positions without replacing earlier work.
+- Imports selected Daily and Rapid games through the public Chess.com API.
+- Finds recurring costly positions with Stockfish 18.
+- Builds a permanent, deduplicated personal puzzle bank.
+- Creates a small **Today** queue from new and due positions.
+- Provides progressive hints without immediately revealing the answer.
+- Lets you play engine continuations and retry only the last incorrect branch move.
+- Recognizes checkmate and other completed positions without requesting an invalid engine reply.
+- Saves chosen positions to a dedicated **Review** bank.
+- Supports **Got it, next** for ideas you feel comfortable retiring.
 
-## Use the installed app
+## Privacy
 
-Open **Chess Leak**, enter a Chess.com username, choose the game types you want
-included, and tap **Analyze**. The initial scan can take a few minutes depending
-on the phone, archive count, and game count. A completed report is cached for
-seven days per username + selected game profile. **Change player** returns to the
-username and game-type picker.
+No Chess.com password or account authorization is used. The app reads public game archives for the username you enter. Its curriculum, review history, and cached analysis remain in local storage on the device or browser where you use it.
 
-In a position:
+## Build and install locally
 
-1. Tap a piece and then a destination.
-2. Any legal move is accepted, including a wrong one.
-3. Use **My game move** to reveal and highlight what was played in the real game.
-4. Use **Show answer** to play the target move and get a short explanation of
-   why it works.
-5. The app confirms the starting position at a stronger depth, counts an
-   engine-equivalent alternative as correct, then reveals the evaluation and
-   explains the approximate cost of other branches.
-6. Use **← Back move** to undo one move inside the current puzzle.
-7. After a move is made, use **→ Best move** to have Stockfish play the best move
-   for the side to move from the latest position.
-8. Continue moving for either side, or tap **Retry**.
-
-The board uses classic high-contrast chess glyphs on a green/cream board, with
-fixed 8x8 row/column sizing so empty ranks never collapse.
-
-## Build and install
-
-Install JDK 17 or newer, the Android SDK with platform tools, and Node.js/npm.
-Set `JAVA_HOME` and `ANDROID_HOME`, enable USB debugging on the phone, connect
-it, then run:
+Install JDK 17 or newer, Android SDK Platform 36 with platform tools, and Node.js/npm. Set `JAVA_HOME` and `ANDROID_HOME`, enable USB debugging, connect an Android phone, and run:
 
 ```text
 build-and-install.cmd
 ```
 
-The script builds the web bundle, assembles a debug APK, installs it on the
-connected phone, and launches it. The APK is written to:
+The script builds the web bundle, assembles the debug APK, installs it on an authorized device, and opens the app. The generated APK is located at:
 
 ```text
 app\build\outputs\apk\debug\app-debug.apk
 ```
 
-The project can also be opened in Android Studio, which can supply the JDK and
-Android SDK. It targets Android 16 (API 36), supports Android 8.0 and newer, and
-uses Gradle's checked-in wrapper.
+To build only the web app:
 
-## Architecture
+```text
+cd web
+npm ci
+npm run build
+```
 
-- `web/src/main.js` — Chess.com import, Stockfish analysis, ranking, plan, and
-  interactive positions.
-- `web/src/styles.css` — phone-first interface.
-- `app/src/main/java/.../MainActivity.java` — hardened local WebView host.
-- `app/src/main/assets/` — generated web bundle and Stockfish WASM.
+## Project structure
 
-Stockfish and stockfish.js are GPL-licensed; retain their license/source notices
-when redistributing the APK.
+- `web/src/main.js` — game import, analysis, puzzle state, review scheduling, and persistence.
+- `web/src/styles.css` — responsive, accessibility-focused interface.
+- `app/src/main/java/.../MainActivity.java` — local Android WebView host.
+- `.github/workflows/deploy-pages.yml` — automatic GitHub Pages deployment from `main`.
+
+Stockfish and its JavaScript/WebAssembly distribution are GPL-licensed. Retain their license and source notices when redistributing the APK.

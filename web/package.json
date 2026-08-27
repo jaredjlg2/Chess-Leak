@@ -1,11 +1,12 @@
 {
   "name": "chess-leak-android-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "prebuild": "node scripts/prepare-assets.mjs",
-    "build": "vite build"
+    "build": "vite build",
+    "build:pages": "vite build --mode pages"
   },
   "dependencies": {
     "chess.js": "1.4.0",

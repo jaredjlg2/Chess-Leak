@@ -3,112 +3,138 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#f5f2e9" />
-  <title>Chess Leak</title>
+  <meta name="theme-color" content="#10201a" />
+  <meta name="description" content="Turn mistakes from your own Chess.com games into focused practice." />
+  <title>Chess Leak — Practice what costs you games</title>
 </head>
 <body>
   <main>
     <section id="onboarding" class="onboarding">
-      <div class="brand-mark">♞</div>
-      <p class="eyebrow">Your games. Your leaks. Your next rating jump.</p>
-      <h1>Train the leak,<br />not the library.</h1>
-      <p class="lede">Enter a Chess.com username. Analysis stays on this phone.</p>
-      <form id="username-form">
-        <label for="username">Chess.com username</label>
-        <div class="input-row">
-          <input id="username" name="username" type="text" autocomplete="username" value="sonyjared" required />
-          <button type="submit">Analyze</button>
+      <header class="onboarding-bar">
+        <a class="brand" href="#onboarding" aria-label="Chess Leak home">
+          <span class="brand-mark" aria-hidden="true">♞</span>
+          <span>Chess Leak</span>
+        </a>
+        <span class="privacy-chip"><span aria-hidden="true">●</span> Stays on this device</span>
+      </header>
+
+      <div class="onboarding-content">
+        <div class="onboarding-copy">
+          <p class="eyebrow eyebrow-light">Practice from your own games</p>
+          <h1>Turn your mistakes into practice.</h1>
+          <p class="lede lede-light">Chess Leak finds the positions that keep costing you and brings them back until the lesson sticks.</p>
         </div>
-        <div class="filter-block" aria-labelledby="game-filter-title">
-          <p id="game-filter-title" class="form-label">Game types to analyze</p>
-          <div id="game-filters" class="game-filters">
-            <label class="filter-card">
-              <input type="checkbox" name="game-filter" value="daily" checked />
-              <span>Daily <small>Best signal for slow thinking and real understanding.</small></span>
-            </label>
-            <label class="filter-card">
-              <input type="checkbox" name="game-filter" value="rapid10" checked />
-              <span>10-minute rapid <small>Includes 10+0 and 10-minute-base rapid games.</small></span>
-            </label>
-            <label class="filter-card">
-              <input type="checkbox" name="game-filter" value="rapidOther" />
-              <span>Other rapid <small>Longer rapid controls like 15+10 or 30-minute games.</small></span>
-            </label>
-            <label class="filter-card">
-              <input type="checkbox" name="game-filter" value="blitz" />
-              <span>Blitz <small>Useful for pattern leaks, noisy for deep understanding.</small></span>
-            </label>
-            <label class="filter-card">
-              <input type="checkbox" name="game-filter" value="bullet" />
-              <span>Bullet <small>Mostly speed noise; leave off unless you want that profile.</small></span>
-            </label>
-          </div>
+
+        <div class="setup-card">
+          <form id="username-form">
+            <label for="username">Chess.com username</label>
+            <div class="input-row">
+              <span class="input-prefix" aria-hidden="true">@</span>
+              <input id="username" name="username" type="text" inputmode="text" autocomplete="username" autocapitalize="none" spellcheck="false" value="sonyjared" placeholder="your_username" required />
+            </div>
+
+            <details class="filter-block">
+              <summary>
+                <span>Game types</span>
+                <small id="filter-summary">Daily and 10-minute rapid selected</small>
+              </summary>
+              <fieldset>
+                <legend>Choose what to analyze</legend>
+                <div id="game-filters" class="game-filters">
+                  <label class="filter-card"><input type="checkbox" name="game-filter" value="daily" checked /><span><strong>Daily</strong><small>Slow thinking</small></span></label>
+                  <label class="filter-card"><input type="checkbox" name="game-filter" value="rapid10" checked /><span><strong>10-minute rapid</strong><small>Best everyday signal</small></span></label>
+                  <label class="filter-card"><input type="checkbox" name="game-filter" value="rapidOther" /><span><strong>Other rapid</strong><small>15+10, 30-minute</small></span></label>
+                  <label class="filter-card"><input type="checkbox" name="game-filter" value="blitz" /><span><strong>Blitz</strong><small>More time-pressure noise</small></span></label>
+                  <label class="filter-card"><input type="checkbox" name="game-filter" value="bullet" /><span><strong>Bullet</strong><small>Speed patterns only</small></span></label>
+                </div>
+              </fieldset>
+            </details>
+
+            <button class="submit-button" type="submit"><span>Build my practice</span><span aria-hidden="true">→</span></button>
+          </form>
+          <a id="download-android" class="download-app" href="https://github.com/jaredjlg2/Chess-Leak/releases/latest/download/Chess-Leak.apk">Download the Android app <span aria-hidden="true">↓</span></a>
+          <p class="fineprint">No login required. Your analysis and progress stay on this device.</p>
         </div>
-      </form>
-      <p class="fineprint">Default: Daily + 10-minute rapid. Only rated standard chess games longer than eight full moves are used.</p>
+      </div>
     </section>
 
     <section id="working" class="working" hidden>
-      <div class="spinner">♞</div>
-      <p class="eyebrow">Building your personal curriculum</p>
-      <h2 id="working-title">Fetching games…</h2>
-      <div class="progress"><span id="progress-fill"></span></div>
-      <p id="progress-text">Connecting to Chess.com</p>
-      <button id="cancel-analysis" class="ghost" type="button">Cancel</button>
+      <div class="status-card">
+        <div class="spinner" aria-hidden="true"><span>♞</span></div>
+        <p class="eyebrow">Finding useful positions</p>
+        <h2 id="working-title">Fetching games…</h2>
+        <p id="progress-text" class="status-copy">Connecting to Chess.com</p>
+        <div class="progress" role="progressbar" aria-label="Analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3"><span id="progress-fill"></span></div>
+        <p class="fineprint">The first scan can take a few minutes. Later visits use your saved practice bank.</p>
+        <button id="cancel-analysis" class="ghost" type="button">Cancel</button>
+      </div>
     </section>
 
-    <section id="report" hidden>
-      <header class="report-head">
-        <button id="change-player" class="text-button" type="button">← Change player</button>
-        <p class="eyebrow">Personal chess coach</p>
-        <h1 id="report-title"></h1>
-        <p id="report-subtitle" class="lede"></p>
+    <section id="report" class="report" hidden>
+      <header class="app-bar">
+        <a class="brand brand-compact" href="#report" aria-label="Chess Leak practice">
+          <span class="brand-mark" aria-hidden="true">♞</span>
+          <span>Chess Leak</span>
+        </a>
+        <button id="change-player" class="player-button" type="button">Change player</button>
       </header>
 
-      <div id="stats" class="stats"></div>
+      <div class="report-content">
+        <header class="workspace-head">
+          <div>
+            <p id="report-subtitle" class="eyebrow"></p>
+            <h1 id="report-title">Today’s practice</h1>
+            <p class="lede">Solve the position before asking the engine. One thoughtful attempt is enough.</p>
+          </div>
+          <div id="review-summary" class="review-summary" aria-label="Practice progress"></div>
+        </header>
 
-      <section>
-        <p class="eyebrow">Ranked by recurring impact</p>
-        <h2>Your leverage ladder</h2>
-        <div id="weaknesses"></div>
-      </section>
+        <section id="puzzle-mode" class="training-section">
+          <div class="training-shell">
+            <div class="deck-switch" aria-label="Choose positions">
+              <button id="deck-today" class="deck-tab active" type="button">Today</button>
+              <button id="deck-all" class="deck-tab" type="button">Library</button>
+              <button id="deck-review" class="deck-tab" type="button">Review</button>
+            </div>
+            <div class="puzzle-nav" aria-label="Position navigation">
+              <button id="puzzle-prev" class="nav-arrow ghost" type="button" aria-label="Previous position">←</button>
+              <span id="deck-count" aria-live="polite"></span>
+              <button id="puzzle-next" class="nav-arrow" type="button" aria-label="Next position">→</button>
+            </div>
+            <div id="puzzles" class="puzzles"></div>
+          </div>
+        </section>
 
-      <section>
-        <p class="eyebrow">Highest-ROI loop</p>
-        <h2>Your next two weeks</h2>
-        <div id="practice-plan" class="practice-plan"></div>
-      </section>
+        <aside class="coach-note">
+          <p class="eyebrow">Coach note</p>
+          <h2 id="focus-title">Your clearest recurring pattern</h2>
+          <p id="focus-copy">Analyze your games to reveal the lesson with the most practical value.</p>
+        </aside>
 
-      <section id="puzzle-mode">
-        <p class="eyebrow">Your mistakes become your curriculum</p>
-        <h2>Personal position bank</h2>
-        <p class="section-copy">Today mixes due reviews with unseen positions. Every new scan adds to this permanent bank instead of replacing it.</p>
-        <div id="review-summary" class="review-summary" aria-label="Curriculum progress"></div>
-        <div class="bank-actions">
-          <button id="analyze-more" type="button">Find more from my games</button>
-          <p id="analysis-status" class="fineprint" aria-live="polite"></p>
-        </div>
-        <div class="deck-switch" aria-label="Choose training deck">
-          <button id="deck-today" class="deck-tab active" type="button">Today</button>
-          <button id="deck-all" class="deck-tab" type="button">All personal</button>
-          <button id="deck-opportunity" class="deck-tab" type="button">Opportunity</button>
-          <button id="deck-blunder" class="deck-tab" type="button">Blunder repair</button>
-        </div>
-        <div id="puzzles" class="puzzles"></div>
-        <div class="deck-actions puzzle-nav">
-          <button id="puzzle-prev" class="ghost" type="button">Previous puzzle</button>
-          <span id="deck-count"></span>
-          <button id="puzzle-next" type="button">Next puzzle</button>
-        </div>
-      </section>
+        <details class="more-tools">
+          <summary>Find more positions from my games</summary>
+          <div>
+            <p id="analysis-status" class="fineprint" aria-live="polite"></p>
+            <button id="analyze-more" type="button">Analyze more games</button>
+          </div>
+        </details>
+
+        <footer class="report-footer">
+          <span>Chess Leak</span>
+          <span>Private, on-device practice</span>
+        </footer>
+      </div>
     </section>
 
     <section id="error-view" class="error-view" hidden>
-      <div class="brand-mark">!</div>
-      <p class="eyebrow">Couldn’t finish the report</p>
-      <h2 id="error-title">Something went wrong</h2>
-      <p id="error-message"></p>
-      <button id="retry-analysis" type="button">Try again</button>
+      <div class="status-card error-card">
+        <div class="error-icon" aria-hidden="true">!</div>
+        <p class="eyebrow">Couldn’t finish</p>
+        <h2 id="error-title">Something went wrong</h2>
+        <p id="error-message" class="status-copy"></p>
+        <button id="retry-analysis" type="button">Try again</button>
+        <button id="error-change-player" class="ghost" type="button">Use another username</button>
+      </div>
     </section>
   </main>
   <script type="module" src="/src/main.js"></script>

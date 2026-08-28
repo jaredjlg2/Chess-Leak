@@ -15,6 +15,8 @@ On Android, the browser may ask you to allow installation from this source. Down
 - Imports selected Daily and Rapid games through the public Chess.com API.
 - Finds recurring costly positions with Stockfish 18.
 - Builds a permanent, deduplicated personal puzzle bank.
+- Pulls only games newer than the latest saved scan when you update your library.
+- Labels imported positions as new issues, recurring issues, or repeated positions.
 - Creates a small **Today** queue from new and due positions.
 - Provides progressive hints without immediately revealing the answer.
 - Lets you play engine continuations and retry only the last incorrect branch move.

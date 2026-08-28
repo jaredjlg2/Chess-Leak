@@ -111,11 +111,20 @@
           <p id="focus-copy">Analyze your games to reveal the lesson with the most practical value.</p>
         </aside>
 
-        <details class="more-tools">
-          <summary>Find more positions from my games</summary>
+        <section class="latest-games" aria-labelledby="latest-games-title">
           <div>
+            <p class="eyebrow">Keep your library current</p>
+            <h2 id="latest-games-title">Pull puzzles from your latest games</h2>
             <p id="analysis-status" class="fineprint" aria-live="polite"></p>
-            <button id="analyze-more" type="button">Analyze more games</button>
+          </div>
+          <button id="pull-latest" type="button"><span>Pull latest games</span><span aria-hidden="true">↻</span></button>
+        </section>
+
+        <details class="more-tools">
+          <summary>Scan older game history</summary>
+          <div>
+            <p class="fineprint">Continue through older eligible games that are not in your saved library yet.</p>
+            <button id="analyze-more" class="ghost" type="button">Analyze older games</button>
           </div>
         </details>
 

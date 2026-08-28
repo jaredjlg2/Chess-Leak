@@ -299,6 +299,10 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
 .review-state.due { color: var(--red); background: var(--red-soft); }
 .review-state.mastered { color: #1c5831; background: #dff0df; }
 .review-state.saved { color: #674b05; background: var(--amber-soft); }
+.issue-state { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--green); background: white; font-size: .56rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.issue-state.new-issue { color: #245616; border-color: #bad785; background: var(--lime-soft); }
+.issue-state.recurring { color: var(--red); border-color: #e7b8b1; background: var(--red-soft); }
+.issue-state.repeated { color: var(--amber); border-color: #ead18b; background: var(--amber-soft); }
 
 .evaluation { margin-bottom: 9px; }
 .eval-bar { position: relative; height: 7px; overflow: hidden; border-radius: 999px; background: linear-gradient(90deg, var(--night) 0 49.5%, #f8f8f5 50.5% 100%); box-shadow: inset 0 0 0 1px rgb(20 32 28 / 18%); }
@@ -359,6 +363,11 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
 .coach-note h2 { max-width: 540px; }
 .coach-note p:last-child { max-width: 600px; margin-bottom: 0; color: #b4c1bc; font-size: .86rem; }
 
+.latest-games { margin-bottom: 14px; padding: clamp(20px, 4vw, 28px); border: 1px solid var(--line); border-radius: var(--radius); display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; background: var(--card); }
+.latest-games .eyebrow { margin-bottom: 7px; }
+.latest-games h2 { margin-bottom: 8px; font-size: clamp(1.45rem, 4vw, 2rem); }
+.latest-games p:last-child { margin-bottom: 0; }
+.latest-games button { min-width: 184px; }
 .more-tools { margin-bottom: 60px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
 .more-tools summary { padding: 16px 18px; color: var(--green); font-size: .8rem; font-weight: 850; cursor: pointer; }
 .more-tools > div { padding: 0 18px 18px; border-top: 1px solid var(--line); }
@@ -413,6 +422,8 @@ button.ghost:hover:not(:disabled) { color: var(--green-dark); background: var(--
   .workspace-head h1 { font-size: clamp(3rem, 14vw, 4.4rem); }
   .review-summary { width: 100%; max-width: 270px; }
   .report-content { padding-inline: 13px; }
+  .latest-games { grid-template-columns: 1fr; gap: 16px; }
+  .latest-games button { width: 100%; }
 }
 
 @media (max-width: 390px) {

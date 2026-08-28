@@ -72,6 +72,7 @@ let activePuzzleIndex = 0;
 let todayQueueIds = [];
 let curriculumSaveChain = Promise.resolve();
 let analysisMessage = "";
+let currentAnalysisMode = "history";
 let achievementTimer = null;
 let achievementHideTimer = null;
 
@@ -385,6 +386,7 @@ function createCurriculum(username, filterIds) {
     attempts: {},
     activity: {},
     reportSummary: null,
+    lastCheckedAt: null,
   };
 }
 
@@ -407,6 +409,7 @@ function normalizeCurriculum(value, username, filterIds) {
   curriculum.activity = curriculum.activity && typeof curriculum.activity === "object"
     ? curriculum.activity
     : {};
+  curriculum.lastCheckedAt = Number(curriculum.lastCheckedAt) || null;
   return curriculum;
 }
 
@@ -544,21 +547,65 @@ function parseGame(raw, username) {
   }
 }
 
-async function loadRecentGames(username, filterIds, excludeGameUrls = []) {
+function archiveMonthIndex(url) {
+  const match = String(url || "").match(/\/games\/(\d{4})\/(\d{2})\/?$/);
+  if (!match) return null;
+  return Number(match[1]) * 12 + Number(match[2]) - 1;
+}
+
+function monthIndexForMs(timestamp) {
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  return date.getUTCFullYear() * 12 + date.getUTCMonth();
+}
+
+function latestAnalyzedGameEndMs(curriculum = currentCurriculum) {
+  const latestGame = (curriculum?.games || []).reduce(
+    (latest, game) => Math.max(latest, Number(game?.endMs) || 0),
+    0
+  );
+  return (curriculum?.positions || []).reduce(
+    (latest, puzzle) => Math.max(latest, Number(puzzle?.gameEndMs) || 0),
+    latestGame
+  ) || null;
+}
+
+function archivesForScan(archiveUrls, archiveLimit, mode, afterEndMs) {
+  const withinHistoryWindow = archiveUrls.slice(-archiveLimit);
+  if (mode !== "latest" || !afterEndMs) return withinHistoryWindow;
+  const cutoffMonth = monthIndexForMs(afterEndMs);
+  if (cutoffMonth === null) return withinHistoryWindow.slice(-1);
+  return withinHistoryWindow.filter((url) => {
+    const archiveMonth = archiveMonthIndex(url);
+    return archiveMonth === null || archiveMonth >= cutoffMonth;
+  });
+}
+
+async function loadRecentGames(username, filterIds, options = {}) {
   const selected = normalizeFilterIds(filterIds);
   if (!selected.length) {
     throw new Error("Choose at least one game type to analyze.");
   }
+  const mode = options.mode === "latest" ? "latest" : "history";
+  const afterEndMs = Number(options.afterEndMs) || null;
   const archiveLimit = selected.includes("daily") ? DAILY_ARCHIVE_MONTHS : DEFAULT_ARCHIVE_MONTHS;
-  setProgress(5, "Fetching selected game archives…", `Looking up ${username} • ${filterSummary(selected)}`);
+  setProgress(
+    5,
+    mode === "latest" ? "Checking for new Chess.com games…" : "Fetching selected game archives…",
+    `Looking up ${username} • ${filterSummary(selected)}`
+  );
   const archives = await fetchJson(`${API}/player/${encodeURIComponent(username)}/games/archives`);
-  const urls = (archives.archives || []).slice(-archiveLimit);
+  const urls = archivesForScan(archives.archives || [], archiveLimit, mode, afterEndMs);
   if (!urls.length) throw new Error("No public Chess.com games were found.");
 
   const rawGames = [];
   for (let index = 0; index < urls.length; index += 1) {
     if (cancelled) throw new Error("Cancelled");
-    setProgress(8 + (index / urls.length) * 14, "Fetching recent games…", `Monthly archive ${index + 1} of ${urls.length}`);
+    setProgress(
+      8 + (index / urls.length) * 14,
+      mode === "latest" ? "Fetching only the latest archives…" : "Fetching recent games…",
+      `Monthly archive ${index + 1} of ${urls.length}`
+    );
     const month = await fetchJson(urls[index]);
     rawGames.push(...(month.games || []));
   }
@@ -574,13 +621,20 @@ async function loadRecentGames(username, filterIds, excludeGameUrls = []) {
     .map((game) => parseGame(game, username))
     .filter(Boolean);
 
-  if (!meaningful.length) {
+  if (!meaningful.length && mode !== "latest") {
     throw new Error(`No rated ${filterSummary(selected)} games longer than eight moves were found in the last ${urls.length} monthly archives. Try adding another game type.`);
   }
-  const analyzed = new Set(excludeGameUrls || []);
-  const unseen = meaningful.filter((game) => !game.url || !analyzed.has(game.url));
+  const analyzed = new Set(options.excludeGameUrls || []);
+  const unseen = meaningful.filter((game) => {
+    if (game.url && analyzed.has(game.url)) return false;
+    if (mode !== "latest" || !afterEndMs) return true;
+    return Number(game.endMs) > afterEndMs;
+  });
+  const scanGames = mode === "latest" && unseen.length > MAX_GAMES
+    ? unseen.slice(-MAX_GAMES)
+    : unseen.slice(0, MAX_GAMES);
   return {
-    games: unseen.slice(0, MAX_GAMES),
+    games: scanGames,
     fetched: rawGames.length,
     eligible: meaningful.length,
     unseen: unseen.length,
@@ -589,6 +643,8 @@ async function loadRecentGames(username, filterIds, excludeGameUrls = []) {
     filterIds: selected,
     filterLabels: selected.map((id) => filterLabel(id, "label")),
     filterSummary: filterSummary(selected),
+    mode,
+    afterEndMs,
   };
 }
 
@@ -1033,12 +1089,34 @@ async function mergeReportIntoCurriculum(report, curriculum = null) {
     report.filterIds
   );
   const now = Date.now();
+  const previousPositions = [...target.positions];
+  const previousThemes = new Set(
+    previousPositions.map((puzzle) => String(puzzle.theme || "").toLowerCase()).filter(Boolean)
+  );
   const positions = new Map(target.positions.map((puzzle) => [puzzle.id || puzzleId(puzzle), puzzle]));
-  collectReportPositions(report).forEach((puzzle) => {
+  const reportPositions = collectReportPositions(report);
+  const reportThemeGames = new Map();
+  reportPositions.forEach((puzzle) => {
+    const theme = String(puzzle.theme || "").toLowerCase();
+    if (!theme) return;
+    if (!reportThemeGames.has(theme)) reportThemeGames.set(theme, new Set());
+    const sourceGames = [...(puzzle.sourceGames || []), puzzle.gameUrl].filter(Boolean);
+    if (!sourceGames.length) sourceGames.push(puzzle.id || puzzleId(puzzle));
+    sourceGames.forEach((game) => reportThemeGames.get(theme).add(game));
+  });
+  const issueCounts = { new: 0, recurring: 0, repeated: 0 };
+  reportPositions.forEach((puzzle) => {
     const id = puzzle.id || puzzleId(puzzle);
     const existing = positions.get(id);
     const tags = new Set([...(existing?.deckTags || []), ...(puzzle.deckTags || [])]);
     const sources = new Set([...(existing?.sourceGames || []), ...(puzzle.sourceGames || [])]);
+    const theme = String(puzzle.theme || "").toLowerCase();
+    const issueType = existing
+      ? "repeated"
+      : previousThemes.has(theme) || (reportThemeGames.get(theme)?.size || 0) > 1
+        ? "recurring"
+        : "new";
+    issueCounts[issueType] += 1;
     positions.set(id, {
       ...(existing || {}),
       ...puzzle,
@@ -1047,6 +1125,8 @@ async function mergeReportIntoCurriculum(report, curriculum = null) {
       sourceGames: [...sources],
       firstSeenAt: existing?.firstSeenAt || now,
       lastSeenAt: now,
+      issueType,
+      issueFirstClassifiedAt: existing?.issueFirstClassifiedAt || now,
     });
   });
   target.positions = [...positions.values()];
@@ -1058,11 +1138,17 @@ async function mergeReportIntoCurriculum(report, curriculum = null) {
     ...target.analyzedGameUrls,
     ...target.games.map((game) => game.url),
   ].filter(Boolean))];
+  target.lastCheckedAt = now;
   target.updatedAt = now;
   const combined = cumulativeReport(target, report);
   target.reportSummary = stripLargeReportData(combined);
   await persistCurriculum(target);
-  return { curriculum: target, report: combined };
+  return {
+    curriculum: target,
+    report: combined,
+    issueCounts,
+    addedPositions: Math.max(0, target.positions.length - previousPositions.length),
+  };
 }
 
 function prescriptionFor(theme) {
@@ -1114,6 +1200,13 @@ function reviewStatusFor(puzzle, now = Date.now()) {
   if (state.dueAt <= now) return { key: "due", label: state.lastCorrect ? "Due" : "Retry due" };
   if (state.mastered) return { key: "mastered", label: "Mastered" };
   return { key: "learning", label: "Learning" };
+}
+
+function issueStatusFor(puzzle) {
+  if (puzzle.issueType === "repeated") return { key: "repeated", label: "Repeated position" };
+  if (puzzle.issueType === "recurring") return { key: "recurring", label: "Recurring issue" };
+  if (puzzle.issueType === "new") return { key: "new-issue", label: "New issue" };
+  return null;
 }
 
 function reviewStats(now = Date.now()) {
@@ -1212,6 +1305,17 @@ function recordPracticeCompletion(puzzle, disposition) {
 
 function todayQueueStorageKey() {
   return currentCurriculum ? `todayQueue:${currentCurriculum.key}:${dateToken()}` : "";
+}
+
+function invalidateTodayQueue() {
+  const key = todayQueueStorageKey();
+  if (!key) return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // The queue will still be refreshed for this session.
+  }
+  todayQueueIds = [];
 }
 
 function buildTodayQueue() {
@@ -2178,9 +2282,10 @@ function createPuzzleCard(puzzle, index) {
   card.className = "puzzle";
   const prompt = "Find the strongest move.";
   const status = reviewStatusFor(puzzle);
+  const issueStatus = issueStatusFor(puzzle);
   const side = puzzle.color === "w" ? "White" : "Black";
   card.innerHTML = `
-    <div class="puzzle-head"><div class="puzzle-title"><span class="eyebrow">${escapeHtml(puzzle.theme)}</span><span class="review-state ${status.key}">${status.label}</span></div><a href="${escapeHtml(puzzle.gameUrl)}" aria-label="Open the original game">Original game ↗</a></div>
+    <div class="puzzle-head"><div class="puzzle-title"><span class="eyebrow">${escapeHtml(puzzle.theme)}</span>${issueStatus ? `<span class="issue-state ${issueStatus.key}">${issueStatus.label}</span>` : ""}<span class="review-state ${status.key}">${status.label}</span></div><a href="${escapeHtml(puzzle.gameUrl)}" aria-label="Open the original game">Original game ↗</a></div>
     <div class="evaluation">
       <div class="eval-bar"><span class="eval-needle"></span></div>
       <div class="eval-meta"><span class="eval-label"></span><span class="turn"></span></div>
@@ -2265,7 +2370,24 @@ function resetPuzzle(card, state) {
   setFeedback(card, "neutral", "Make your move.");
 }
 
-async function startAnalysis(username, filterIds = selectedFilterIds()) {
+function scannedThroughText(timestamp) {
+  if (!timestamp) return "your last saved game";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(timestamp));
+}
+
+function issueSummaryText(issueCounts) {
+  const parts = [];
+  if (issueCounts.new) parts.push(`${issueCounts.new} new issue${issueCounts.new === 1 ? "" : "s"}`);
+  if (issueCounts.recurring) parts.push(`${issueCounts.recurring} recurring issue${issueCounts.recurring === 1 ? "" : "s"}`);
+  if (issueCounts.repeated) parts.push(`${issueCounts.repeated} repeated position${issueCounts.repeated === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+async function startAnalysis(username, filterIds = selectedFilterIds(), options = {}) {
   currentUsername = username.trim().toLowerCase();
   if (!currentUsername) return;
   const selected = normalizeFilterIds(filterIds);
@@ -2273,6 +2395,7 @@ async function startAnalysis(username, filterIds = selectedFilterIds()) {
     showError("Choose game types", "Pick at least one game type before analyzing. Daily + 10-minute rapid is the recommended starting profile.");
     return;
   }
+  currentAnalysisMode = options.mode === "latest" ? "latest" : "history";
   cancelled = false;
   localStorage.setItem("lastUsername", currentUsername);
   localStorage.setItem("lastFilterIds", JSON.stringify(selected));
@@ -2281,17 +2404,26 @@ async function startAnalysis(username, filterIds = selectedFilterIds()) {
   try {
     await ensureEngine();
     currentCurriculum = await loadCurriculum(currentUsername, selected);
-    const beforePositions = currentCurriculum.positions.length;
+    const latestGameEndMs = latestAnalyzedGameEndMs(currentCurriculum);
+    const scanMode = currentAnalysisMode === "latest" && latestGameEndMs ? "latest" : "history";
     const loaded = await loadRecentGames(
       currentUsername,
       selected,
-      currentCurriculum.analyzedGameUrls
+      {
+        mode: scanMode,
+        afterEndMs: scanMode === "latest" ? latestGameEndMs : null,
+        excludeGameUrls: currentCurriculum.analyzedGameUrls,
+      }
     );
     if (!loaded.games.length) {
       if (!currentCurriculum.positions.length) {
         throw new Error("No unanalyzed games were available for this profile.");
       }
-      analysisMessage = "Your position bank is current for the available game history.";
+      currentCurriculum.lastCheckedAt = Date.now();
+      await persistCurriculum(currentCurriculum);
+      analysisMessage = scanMode === "latest"
+        ? `You’re current. No new eligible games were found after ${scannedThroughText(latestGameEndMs)}.`
+        : "Your position bank is current for the available game history.";
       currentReport = cumulativeReport(currentCurriculum);
       renderReport(currentReport, { resumePuzzle: true });
       return;
@@ -2302,8 +2434,10 @@ async function startAnalysis(username, filterIds = selectedFilterIds()) {
     currentCurriculum = merged.curriculum;
     const report = merged.report;
     saveReport(report);
-    const added = Math.max(0, currentCurriculum.positions.length - beforePositions);
-    analysisMessage = `${loaded.games.length} games analyzed · ${added} new unique position${added === 1 ? "" : "s"} added.`;
+    invalidateTodayQueue();
+    const issueSummary = issueSummaryText(merged.issueCounts);
+    analysisMessage = `${loaded.games.length} ${scanMode === "latest" ? "new " : ""}game${loaded.games.length === 1 ? "" : "s"} analyzed · ${merged.addedPositions} unique position${merged.addedPositions === 1 ? "" : "s"} added.`;
+    if (issueSummary) analysisMessage += ` ${issueSummary}.`;
     if (loaded.remainingEligibleGames > 0) {
       analysisMessage += ` ${loaded.remainingEligibleGames} more eligible games are ready for another scan.`;
     }
@@ -2326,12 +2460,22 @@ $("#cancel-analysis").addEventListener("click", () => {
   cancelled = true;
   showView("#onboarding");
 });
-$("#retry-analysis").addEventListener("click", () => startAnalysis(currentUsername || $("#username").value, selectedFilterIds()));
+$("#retry-analysis").addEventListener("click", () => startAnalysis(
+  currentUsername || $("#username").value,
+  currentReport?.filterIds || selectedFilterIds(),
+  { mode: currentAnalysisMode }
+));
 $("#change-player").addEventListener("click", () => showView("#onboarding"));
 $("#error-change-player").addEventListener("click", () => showView("#onboarding"));
+$("#pull-latest").addEventListener("click", () => startAnalysis(
+  currentReport?.username || currentUsername || $("#username").value,
+  currentReport?.filterIds || selectedFilterIds(),
+  { mode: "latest" }
+));
 $("#analyze-more").addEventListener("click", () => startAnalysis(
   currentReport?.username || currentUsername || $("#username").value,
-  currentReport?.filterIds || selectedFilterIds()
+  currentReport?.filterIds || selectedFilterIds(),
+  { mode: "history" }
 ));
 $("#puzzle-prev").addEventListener("click", () => {
   activePuzzleIndex = clampIndex(activePuzzleIndex - 1, activePuzzles().length);
@@ -2393,7 +2537,10 @@ async function boot() {
       currentReport = cumulativeReport(currentCurriculum, cached || currentCurriculum.reportSummary);
     }
     if (currentReport?.puzzleDecks?.all?.length) {
-      analysisMessage = "Your permanent personal position bank is ready.";
+      const latestGameEndMs = latestAnalyzedGameEndMs(currentCurriculum);
+      analysisMessage = latestGameEndMs
+        ? `Your personal position bank is ready. Latest game scanned: ${scannedThroughText(latestGameEndMs)}.`
+        : "Your permanent personal position bank is ready.";
       renderReport(currentReport, { resumePuzzle: true });
     } else {
       showView("#onboarding");
